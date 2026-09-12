@@ -10,6 +10,12 @@ built in.
 Everything runs on a single Windows machine with Docker; nothing is tied to a
 specific cloud. Switching from local MinIO to AWS S3 is a **config-only** change.
 
+> 📊 **Presentation:** A full walkthrough of the project — architecture diagrams,
+> screenshots (pipeline, observability, storage, dashboard), and design details —
+> is available in [`chicago_taxi_lakehouse.pptx`](./chicago_taxi_lakehouse.pptx)
+> at the repository root. Start there for a visual overview before diving into the
+> sections below.
+
 ---
 
 ## Table of contents
