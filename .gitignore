@@ -17,8 +17,13 @@ tmp/
 .cursor/
 
 # Local data & secrets
+data/
+.env
 .env.local
 *.log
+
+# Cursor IDE
+.cursor/
 
 # Dagster local storage (runtime data ignored, but keep the instance config)
 dagster_home/
