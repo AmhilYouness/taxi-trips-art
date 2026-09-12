@@ -1,0 +1,42 @@
+# ============================================================
+#  Spark 4.1.1 + Apache Iceberg 1.11.0 engine image
+#  Built for Dagster Pipes: runs spark-submit jobs that report
+#  materialization metadata back to Dagster over stdout.
+#
+#  Build (from project root):
+#    docker build -f docker/Dockerfile.spark -t arte-spark:4.1.1 .
+# ============================================================
+FROM apache/spark:4.1.1-scala2.13-java17-python3-ubuntu
+
+USER root
+
+ARG ICEBERG_VERSION=1.11.0
+ARG SPARK_ICEBERG_ARTIFACT=iceberg-spark-runtime-4.1_2.13
+ARG MAVEN=https://repo1.maven.org/maven2/org/apache/iceberg
+
+# Iceberg runtime + AWS bundle (S3FileIO) jars, plus dagster-pipes / requests /
+# boto3 for the Python entrypoints (SODA extractor + boto3-based raw reads).
+# Everything is baked in so jobs need no network resolution at runtime.
+#
+# NOTE: we deliberately do NOT add hadoop-aws/S3A. hadoop-aws 3.4.x pulls AWS
+# SDK v2 transfer-manager classes that iceberg-aws-bundle does not ship, and a
+# second SDK bundle collides with Iceberg's. Bronze instead reads raw CSV by
+# downloading month files from MinIO with boto3, then reading them locally.
+#
+# The base image already ships curl + python3-pip, so we skip apt entirely
+# (the Ubuntu mirror can be pathologically slow behind some networks).
+RUN set -eux; \
+    curl -fSL -o "/opt/spark/jars/${SPARK_ICEBERG_ARTIFACT}-${ICEBERG_VERSION}.jar" \
+      "${MAVEN}/${SPARK_ICEBERG_ARTIFACT}/${ICEBERG_VERSION}/${SPARK_ICEBERG_ARTIFACT}-${ICEBERG_VERSION}.jar"; \
+    curl -fSL -o "/opt/spark/jars/iceberg-aws-bundle-${ICEBERG_VERSION}.jar" \
+      "${MAVEN}/iceberg-aws-bundle/${ICEBERG_VERSION}/iceberg-aws-bundle-${ICEBERG_VERSION}.jar"; \
+    pip3 install --no-cache-dir dagster-pipes requests boto3
+
+# Application code (bronze/silver/gold jobs + common session builder)
+COPY spark_jobs /app/spark_jobs
+
+# Make `common` importable as a package from the job scripts
+ENV PYTHONPATH=/app/spark_jobs
+WORKDIR /app
+
+USER spark

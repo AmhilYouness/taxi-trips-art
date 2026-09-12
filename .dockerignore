@@ -1,0 +1,11 @@
+# Keep the Spark image build context small
+**/.venv/
+**/__pycache__/
+**/node_modules/
+dashboard/
+orchestration/
+serving/
+tmp/
+data/
+*.log
+.git/

@@ -1,0 +1,172 @@
+# ============================================================
+#  Lakehouse infrastructure: MinIO + Lakekeeper (Iceberg REST) + Postgres
+#  Bring up with:  docker compose up -d
+#  Everything shares the external-friendly network "iceberg_net" so the
+#  Dagster-launched Spark containers can join it by name.
+# ============================================================
+
+services:
+  # ---- Object storage (S3-compatible) ----
+  minio:
+    image: minio/minio:latest
+    container_name: arte-minio
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_DOMAIN: minio
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      iceberg_net:
+
+  # ---- Create the warehouse bucket once MinIO is up ----
+  createbuckets:
+    image: minio/mc:latest
+    container_name: arte-createbuckets
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/lakehouse &&
+      mc anonymous set none local/lakehouse &&
+      echo 'bucket lakehouse ready';
+      "
+    networks:
+      iceberg_net:
+
+  # ---- Catalog metadata backend ----
+  db:
+    image: postgres:16
+    container_name: arte-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      iceberg_net:
+
+  # ---- Lakekeeper DB migration (runs once) ----
+  migrate:
+    image: ${LAKEKEEPER_IMAGE:-quay.io/lakekeeper/catalog:latest-main}
+    container_name: arte-lakekeeper-migrate
+    pull_policy: always
+    environment:
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=This-is-NOT-Secure-change-me
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://postgres:postgres@db:5432/postgres
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://postgres:postgres@db:5432/postgres
+      - RUST_LOG=info
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      iceberg_net:
+
+  # ---- Lakekeeper: Iceberg REST catalog ----
+  lakekeeper:
+    image: ${LAKEKEEPER_IMAGE:-quay.io/lakekeeper/catalog:latest-main}
+    container_name: arte-lakekeeper
+    pull_policy: always
+    environment:
+      - LAKEKEEPER__PG_ENCRYPTION_KEY=This-is-NOT-Secure-change-me
+      - LAKEKEEPER__PG_DATABASE_URL_READ=postgresql://postgres:postgres@db:5432/postgres
+      - LAKEKEEPER__PG_DATABASE_URL_WRITE=postgresql://postgres:postgres@db:5432/postgres
+      - RUST_LOG=info
+    command: ["serve"]
+    healthcheck:
+      test: ["CMD", "/home/nonroot/lakekeeper", "healthcheck"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+    ports:
+      - "8181:8181"
+    networks:
+      iceberg_net:
+
+  # ---- Set the initial admin / first project (runs once) ----
+  bootstrap:
+    image: curlimages/curl:latest
+    container_name: arte-lakekeeper-bootstrap
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+    restart: "no"
+    command:
+      - "-w"
+      - "%{http_code}"
+      - "-X"
+      - "POST"
+      - "http://lakekeeper:8181/management/v1/bootstrap"
+      - "-H"
+      - "Content-Type: application/json"
+      - "--data"
+      - '{"accept-terms-of-use": true}'
+      - "-o"
+      - "/dev/null"
+    networks:
+      iceberg_net:
+
+  # ---- Create the "lakehouse" warehouse pointing at MinIO (runs once) ----
+  initialwarehouse:
+    image: curlimages/curl:latest
+    container_name: arte-lakekeeper-warehouse
+    depends_on:
+      lakekeeper:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+    command:
+      - "-w"
+      - "%{http_code}"
+      - "-X"
+      - "POST"
+      - "http://lakekeeper:8181/management/v1/warehouse"
+      - "-H"
+      - "Content-Type: application/json"
+      - "--data"
+      - "@/create-default-warehouse.json"
+      - "-o"
+      - "/dev/null"
+    volumes:
+      - ./docker/create-default-warehouse.json:/create-default-warehouse.json:ro
+    networks:
+      iceberg_net:
+
+volumes:
+  minio_data:
+  pg_data:
+
+networks:
+  iceberg_net:
+    name: iceberg_net

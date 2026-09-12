@@ -1,0 +1,10 @@
+[project]
+name = "orchestration"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "dagster>=1.13.21",
+    "dagster-docker>=0.29.21",
+    "dagster-webserver>=1.13.21",
+    "python-dotenv>=1.2.3",
+]

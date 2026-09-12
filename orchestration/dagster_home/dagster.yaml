@@ -1,0 +1,38 @@
+# Persistent Dagster instance config (the pipeline observability layer).
+#
+# Point DAGSTER_HOME at this folder, then run `uv run dagster dev` (see
+# ../run_dagster.ps1). Run history, event logs, and asset-check results are
+# persisted here in SQLite, so the UI keeps a full history across restarts.
+#
+# Storage is intentionally left at its defaults: with DAGSTER_HOME set, Dagster
+# uses SQLite run/event-log/schedule storage under this directory.
+
+# No usage stats phoned home.
+telemetry:
+  enabled: false
+
+# Persist each step's stdout/stderr on disk + expose it in the UI. base_dir is
+# supplied via an env var (set by run_dagster.ps1) so the path stays inside
+# DAGSTER_HOME regardless of the working directory.
+compute_logs:
+  module: dagster._core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir:
+      env: DAGSTER_COMPUTE_LOG_DIR
+
+# Detect + mark runs whose process died (hung/crashed) instead of leaving them
+# STARTED forever - surfaces infra failures in the UI and to the alarm sensor.
+run_monitoring:
+  enabled: true
+  max_resume_run_attempts: 0
+
+# Keep the instance from growing unbounded: prune old schedule/sensor ticks.
+retention:
+  schedule:
+    purge_after_days: 90
+  sensor:
+    purge_after_days:
+      skipped: 7
+      failure: 90
+      success: 30

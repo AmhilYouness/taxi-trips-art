@@ -1,0 +1,34 @@
+# Environments
+.venv/
+**/.venv/
+__pycache__/
+*.pyc
+
+# uv
+# (uv.lock IS committed; caches are not)
+
+# Node / React
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# Scratch / archived setup files
+tmp/
+.cursor/
+
+# Local data & secrets
+.env.local
+*.log
+
+# Dagster local storage (runtime data ignored, but keep the instance config)
+dagster_home/
+!orchestration/dagster_home/
+orchestration/dagster_home/**
+!orchestration/dagster_home/dagster.yaml
+.dagster/
+
+# OS
+.DS_Store
+Thumbs.db
+
+.env
